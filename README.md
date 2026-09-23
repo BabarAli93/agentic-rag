@@ -1,7 +1,9 @@
 # Agentic RAG System
 
 A locally deployed agentic RAG system for document ingestion, semantic search, and LLM-based question answering.
-It uses Inngest, OpenAI, Docker, Qdrant DB, and a Node.js backend to run this application.
+It uses Inngest, OpenAI, Docker, Qdrant DB, and a Node.js backend to run this application. Inspired from techwithtim.
+
+
 
 <img width="1918" height="841" alt="Screenshot from 2026-09-23 12-23-24" src="https://github.com/user-attachments/assets/dd879a00-76d0-4a3b-84b5-80d11cb288ec" />
 
