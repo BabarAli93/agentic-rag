@@ -15,7 +15,7 @@ Agentic RAG is a document and website question-answering workbench. Add PDF or T
 
 - Python 3.13+
 - FastAPI and Uvicorn
-- LangChain and Deep Agents
+- LangGraph and Deep Agents
 - Qdrant for vector storage and dense/sparse hybrid retrieval
 - OpenAI `gpt-4o-mini` for chat and `text-embedding-3-small` for embeddings
 - FlashRank `ms-marco-MiniLM-L-12-v2` for local passage reranking
