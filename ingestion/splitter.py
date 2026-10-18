@@ -3,8 +3,6 @@ from langchain_text_splitters import (
     RecursiveCharacterTextSplitter
 )
 
-
-
 def split_documents(documents: list[Document]) -> list[Document]:
     """This function will receive a list of documents and chunk them """
 
