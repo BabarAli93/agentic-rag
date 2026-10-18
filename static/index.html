@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic RAG Workbench (NotebookLM Style)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Marked.js for clean Markdown rendering during chat streaming -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen flex overflow-hidden font-sans">
+
+    <!-- LEFT SIDEBAR: Sources Management -->
+    <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col justify-between">
+        <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+            <h1 class="font-bold text-lg flex items-center gap-2">
+                <i class="fa-solid fa-book-bookmark text-indigo-400"></i> Sources Workbench
+            </h1>
+            <span id="tenant-badge" class="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono" title="Isolated Session ID">session</span>
+        </div>
+
+        <!-- Sources List -->
+        <div id="sources-container" class="flex-1 overflow-y-auto p-4 space-y-3">
+            <p class="text-xs text-slate-500 italic">No sources added yet. Upload files or add websites below.</p>
+        </div>
+
+        <!-- Add Sources Controls -->
+        <div class="p-4 border-t border-slate-800 space-y-3 bg-slate-900/50">
+            <!-- Website Form -->
+            <div class="space-y-1">
+                <label class="text-xs font-semibold text-slate-400">Add Website URL</label>
+                <div class="flex gap-2">
+                    <input type="url" id="url-input" placeholder="https://example.com" class="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-indigo-500">
+                    <button onclick="handleUrlSubmit()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-sm font-medium transition">Add</button>
+                </div>
+            </div>
+
+            <!-- File Upload Form -->
+            <div class="space-y-1">
+                <label class="text-xs font-semibold text-slate-400">Upload PDF / TXT</label>
+                <input type="file" id="file-input" multiple accept=".pdf,.txt" onchange="handleFileUpload(event)" class="w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN CHAT AREA -->
+    <main class="flex-1 flex flex-col bg-slate-950">
+        <!-- Chat Header -->
+        <header class="h-14 border-b border-slate-800 px-6 flex items-center justify-between bg-slate-900/50">
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="text-sm font-medium text-slate-300">Agentic RAG Engine Active</span>
+            </div>
+            <button onclick="startNewChat()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer" title="Start a fresh chat thread">
+                <i class="fa-solid fa-plus text-[10px]"></i> New Chat
+            </button>
+        </header>
+
+        <!-- Chat Messages Stream -->
+        <div id="chat-messages" class="flex-1 overflow-y-auto p-6 space-y-4">
+            <div class="flex gap-3">
+                <div class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold shrink-0">AI</div>
+                <div class="bg-slate-900 rounded-2xl px-4 py-3 max-w-2xl text-sm leading-relaxed border border-slate-800">
+                    Hello! I am your Agentic RAG assistant. Add your PDFs, TXT files, or website URLs on the left panel, and ask me anything about them! Click any source on the left to inspect its extracted chunks.
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Input Bar -->
+        <div class="p-4 border-t border-slate-800 bg-slate-900/50">
+            <div class="max-w-4xl mx-auto flex gap-2">
+                <textarea id="chat-input" rows="1" placeholder="Ask a question about your sources..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 resize-none" onkeydown="handleKeydown(event)"></textarea>
+                <button onclick="handleSend()" class="bg-indigo-600 hover:bg-indigo-500 px-5 rounded-xl font-medium text-sm transition flex items-center justify-center">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- SOURCE INSPECTOR MODAL -->
+    <div id="inspector-modal" class="fixed inset-0 bg-black/70 backdrop-blur-xs hidden items-center justify-center z-50 p-6">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl flex flex-col max-h-[85vh] shadow-2xl">
+            <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+                <h3 id="modal-title" class="font-bold text-base text-slate-200 truncate">Source Inspector</h3>
+                <button onclick="closeInspector()" class="text-slate-400 hover:text-slate-200 p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <div id="modal-chunks-container" class="p-6 overflow-y-auto space-y-4 flex-1">
+                <!-- Chunks injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- FRONTEND JAVASCRIPT LOGIC -->
+    <script>
+        let OWNER_ID = localStorage.getItem('rag_owner_id');
+        if (!OWNER_ID) {
+            OWNER_ID = 'user_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('rag_owner_id', OWNER_ID);
+        }
+        document.getElementById('tenant-badge').innerText = OWNER_ID.substring(0, 10);
+
+        // Use sessionStorage so every new tab / incognito window starts a fresh thread by default,
+        // while closing the tab creates a clean break.
+        let CURRENT_THREAD_ID = sessionStorage.getItem('rag_thread_id');
+        if (!CURRENT_THREAD_ID) {
+            CURRENT_THREAD_ID = 'thread_' + Math.random().toString(36).substr(2, 9);
+            sessionStorage.setItem('rag_thread_id', CURRENT_THREAD_ID);
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            loadSources();
+            loadChatHistory();
+        });
+
+        // Function to wipe current chat UI and initialize a brand-new thread
+        function startNewChat() {
+            CURRENT_THREAD_ID = 'thread_' + Math.random().toString(36).substr(2, 9);
+            sessionStorage.setItem('rag_thread_id', CURRENT_THREAD_ID);
+            
+            const container = document.getElementById('chat-messages');
+            container.innerHTML = `
+                <div class="flex gap-3">
+                    <div class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold shrink-0">AI</div>
+                    <div class="bg-slate-900 rounded-2xl px-4 py-3 max-w-2xl text-sm leading-relaxed border border-slate-800">
+                        Hello! I am your Agentic RAG assistant. Add your PDFs, TXT files, or website URLs on the left panel, and ask me anything about them! Click any source on the left to inspect its extracted chunks.
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadChatHistory() {
+            try {
+                const res = await fetch(`/api/chat/history?thread_id=${CURRENT_THREAD_ID}`);
+                const data = await res.json();
+                
+                if (data.messages && data.messages.length > 0) {
+                    const container = document.getElementById('chat-messages');
+                    container.innerHTML = ""; // Clear initial welcome card
+
+                    data.messages.forEach(msg => {
+                        const msgId = appendMessage(msg.sender, "");
+                        updateMessageFormatted(msgId, msg.text);
+                    });
+                }
+            } catch (err) {
+                console.error("Failed to load chat history:", err);
+            }
+        }
+
+        async function loadSources() {
+            try {
+                const res = await fetch(`/api/sources?owner_id=${OWNER_ID}`);
+                const data = await res.json();
+                renderSourcesList(data.sources || []);
+            } catch (err) {
+                console.error("Failed to load sources:", err);
+            }
+        }
+
+        function renderSourcesList(sources) {
+            const container = document.getElementById('sources-container');
+            if (sources.length === 0) {
+                container.innerHTML = `<p class="text-xs text-slate-500 italic">No sources added yet. Upload files or add websites below.</p>`;
+                return;
+            }
+
+            container.innerHTML = sources.map(s => `
+                <div class="bg-slate-900 border border-slate-800 p-3 rounded-lg flex items-center justify-between text-xs group hover:border-slate-700 transition">
+                    <div class="overflow-hidden cursor-pointer flex-1" onclick="inspectSource('${s.source_id}', '${escapeHtml(s.source_name)}')">
+                        <div class="font-medium text-slate-200 truncate" title="${s.source_name}">${s.source_name}</div>
+                        <div class="text-slate-500 mt-0.5">${s.chunk_count || 0} chunks (${s.source_type || 'doc'})</div>
+                    </div>
+                    <button onclick="event.stopPropagation(); deleteSource('${s.source_id}', '${escapeHtml(s.source_name)}')" class="text-slate-500 hover:text-red-400 p-1.5 opacity-0 group-hover:opacity-100 transition" title="Delete source">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
+
+        async function inspectSource(sourceId, sourceName) {
+            document.getElementById('modal-title').innerText = `Inspecting: ${sourceName}`;
+            const chunksContainer = document.getElementById('modal-chunks-container');
+            chunksContainer.innerHTML = `<p class="text-sm text-slate-400 animate-pulse">Loading extracted chunks...</p>`;
+            
+            document.getElementById('inspector-modal').classList.remove('hidden');
+            document.getElementById('inspector-modal').classList.add('flex');
+
+            try {
+                const res = await fetch(`/api/sources/${sourceId}/chunks?owner_id=${OWNER_ID}`);
+                const data = await res.json();
+                
+                if (!data.chunks || data.chunks.length === 0) {
+                    chunksContainer.innerHTML = `<p class="text-sm text-slate-500 italic">No text chunks found for this source.</p>`;
+                    return;
+                }
+
+                chunksContainer.innerHTML = data.chunks.map((c, idx) => `
+                    <div id="chunk-${idx}" class="bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs space-y-2 transition-all duration-500 hover:border-indigo-500/50">
+                        <div class="flex justify-between text-slate-500 font-mono">
+                            <span>Chunk #${idx + 1}</span>
+                            <span>ID: ${c.chunk_id || idx}</span>
+                        </div>
+                        <p class="text-slate-300 leading-relaxed font-sans whitespace-pre-wrap">${c.text || c.page_content || JSON.stringify(c)}</p>
+                    </div>
+                `).join('');
+
+                setTimeout(() => {
+                    const firstChunk = document.getElementById('chunk-0');
+                    if (firstChunk) {
+                        firstChunk.classList.add('border-indigo-500', 'bg-indigo-950/30', 'ring-1', 'ring-indigo-500/50');
+                        firstChunk.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }, 100);
+
+            } catch (err) {
+                chunksContainer.innerHTML = `<p class="text-sm text-red-400">Failed to load chunks for this source.</p>`;
+            }
+        }
+
+        function closeInspector() {
+            document.getElementById('inspector-modal').classList.remove('flex');
+            document.getElementById('inspector-modal').classList.add('hidden');
+        }
+
+        async function deleteSource(sourceId, sourceName) {
+            if (!confirm(`Are you sure you want to delete "${sourceName}"? This will remove it from Qdrant storage and your active sources.`)) return;
+
+            try {
+                const res = await fetch(`/api/sources/${sourceId}?owner_id=${OWNER_ID}`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    loadSources();
+                } else {
+                    alert("Failed to delete source on server.");
+                }
+            } catch (e) {
+                console.error("Failed to delete source", e);
+            }
+        }
+
+        async function handleUrlSubmit() {
+            const input = document.getElementById('url-input');
+            const url = input.value.trim();
+            if (!url) return;
+
+            input.value = '';
+            appendMessage("System", `Indexing website: ${url}...`, true);
+
+            try {
+                const res = await fetch('/api/sources/url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url, owner_id: OWNER_ID })
+                });
+                if (res.ok) {
+                    loadSources();
+                    appendMessage("System", `Successfully indexed website!`, true);
+                } else {
+                    const err = await res.json();
+                    appendMessage("System", `Error indexing URL: ${err.detail}`, true);
+                }
+            } catch (e) {
+                appendMessage("System", `Network error indexing URL.`, true);
+            }
+        }
+
+        async function handleFileUpload(event) {
+            const files = event.target.files;
+            if (!files.length) return;
+
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('owner_id', OWNER_ID);
+
+                appendMessage("System", `Uploading and indexing ${file.name}...`, true);
+
+                try {
+                    const res = await fetch('/api/sources/file', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    if (res.ok) {
+                        loadSources();
+                        appendMessage("System", `Successfully indexed ${file.name}!`, true);
+                    } else {
+                        const err = await res.json();
+                        appendMessage("System", `Error indexing ${file.name}: ${err.detail}`, true);
+                    }
+                } catch (e) {
+                    appendMessage("System", `Network error uploading file.`, true);
+                }
+            }
+            event.target.value = '';
+        }
+
+        function handleKeydown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                handleSend();
+            }
+        }
+
+        async function handleSend() {
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            input.value = '';
+            appendMessage("User", text);
+
+            const aiMsgId = appendMessage("AI", "", false, false);
+            let fullResponse = "";
+
+            try {
+                const response = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text, owner_id: OWNER_ID, thread_id: CURRENT_THREAD_ID })
+                });
+
+                if (!response.ok) throw new Error("Failed to connect to streaming endpoint.");
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const jsonStr = line.substring(6);
+                            try {
+                                const data = JSON.parse(jsonStr);
+                                if (data.token) {
+                                    fullResponse += data.token;
+                                    updateMessageFormatted(aiMsgId, fullResponse);
+                                }
+                                if (data.error) {
+                                    updateMessageFormatted(aiMsgId, `Error: ${data.error}`);
+                                }
+                            } catch (e) {
+                                console.error("Error parsing SSE JSON", e);
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                updateMessageFormatted(aiMsgId, "Error communicating with the agent server.");
+            }
+        }
+
+        function appendMessage(sender, text, isSystem = false, isPending = false) {
+            const container = document.getElementById('chat-messages');
+            const msgId = 'msg_' + Math.random().toString(36).substr(2, 9);
+            
+            const isUser = sender === "User";
+            const bubbleBg = isUser ? "bg-indigo-600 text-white" : (isSystem ? "bg-slate-900/60 text-slate-400 border border-slate-800 text-xs italic" : "bg-slate-900 text-slate-100 border border-slate-800");
+
+            const html = `
+                <div id="${msgId}" class="flex gap-3 ${isUser ? 'flex-row-reverse' : ''}">
+                    <div class="w-8 h-8 rounded-full ${isUser ? 'bg-emerald-600' : 'bg-indigo-600'} flex items-center justify-center text-sm font-bold shrink-0">
+                        ${isUser ? 'U' : 'AI'}
+                    </div>
+                    <div class="${bubbleBg} rounded-2xl px-4 py-3 max-w-2xl text-sm leading-relaxed ${isPending ? 'animate-pulse' : ''}">
+                        ${text}
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', html);
+            container.scrollTop = container.scrollHeight;
+            return msgId;
+        }
+
+        function updateMessageFormatted(msgId, rawText) {
+            const el = document.getElementById(msgId);
+            if (!el) return;
+            const bubble = el.querySelector('div:nth-child(2)');
+            if (!bubble) return;
+
+            let processedText = rawText.replace(/\[\s*(?:CITATION REF\s*->\s*)?Source:\s*([^\]]+)\]/gi, (match, sourceName) => {
+                const cleanName = sourceName.trim();
+                let displayLabel = cleanName;
+                if (cleanName.startsWith('http://') || cleanName.startsWith('https://')) {
+                    try {
+                        const parsedUrl = new URL(cleanName);
+                        displayLabel = parsedUrl.hostname + parsedUrl.pathname.substring(0, 15) + '...';
+                    } catch (e) {
+                        displayLabel = cleanName;
+                    }
+                }
+
+                return ` <button data-source-name="${escapeAttr(cleanName)}" class="citation-trigger inline-flex items-center gap-1 bg-indigo-950/80 border border-indigo-700/50 text-indigo-300 hover:bg-indigo-900 px-2 py-0.5 rounded text-xs mx-1 font-mono transition cursor-pointer" title="Inspect source: ${escapeAttr(cleanName)}">
+                    <i class="fa-solid fa-file-lines text-[10px]"></i> ${escapeHtmlText(displayLabel)}
+                </button> `;
+            });
+
+            bubble.innerHTML = marked.parse(processedText);
+
+            bubble.querySelectorAll('.citation-trigger').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const sourceName = btn.getAttribute('data-source-name');
+                    triggerInspectByName(sourceName);
+                });
+            });
+
+            bubble.querySelectorAll('p').forEach(p => p.classList.add('mb-3', 'leading-relaxed'));
+            bubble.querySelectorAll('ul').forEach(ul => ul.classList.add('my-2', 'pl-5', 'list-disc', 'space-y-1'));
+            bubble.querySelectorAll('ol').forEach(ol => ol.classList.add('my-2', 'pl-5', 'list-decimal', 'space-y-1'));
+            bubble.querySelectorAll('li').forEach(li => li.classList.add('leading-relaxed'));
+            bubble.querySelectorAll('h1, h2, h3, h4').forEach(h => h.classList.add('font-bold', 'mt-4', 'mb-2', 'text-indigo-300'));
+            bubble.querySelectorAll('pre').forEach(pre => pre.classList.add('bg-slate-950', 'border', 'border-slate-800', 'p-3', 'rounded-lg', 'my-2', 'overflow-x-auto', 'font-mono', 'text-xs'));
+            bubble.querySelectorAll('code:not(pre code)').forEach(code => code.classList.add('bg-slate-950', 'px-1.5', 'py-0.5', 'rounded', 'text-xs', 'font-mono', 'text-indigo-200'));
+
+            const container = document.getElementById('chat-messages');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function triggerInspectByName(sourceName) {
+            try {
+                const res = await fetch(`/api/sources?owner_id=${OWNER_ID}`);
+                const data = await res.json();
+                const sources = data.sources || [];
+
+                if (sources.length === 0) {
+                    alert("No active sources in workspace.");
+                    return;
+                }
+
+                const target = sourceName.toLowerCase().trim();
+                let found = sources.find(s => 
+                    s.source_id.toLowerCase() === target || 
+                    s.source_name.toLowerCase() === target
+                );
+
+                if (!found) {
+                    found = sources.find(s => 
+                        target.includes(s.source_name.toLowerCase()) || 
+                        s.source_name.toLowerCase().includes(target)
+                    );
+                }
+
+                if (!found && (target.startsWith('http://') || target.startsWith('https://'))) {
+                    found = sources.find(s => s.source_type === 'url' || s.source_name.includes('http'));
+                }
+
+                if (!found) {
+                    found = sources[0];
+                }
+
+                if (found) {
+                    inspectSource(found.source_id, found.source_name);
+                } else {
+                    alert(`Source "${sourceName}" could not be matched.`);
+                }
+            } catch (e) {
+                console.error("Could not open source inspector", e);
+            }
+        }
+
+        function escapeHtmlText(text) {
+            return text.replace(/&/g, "&amp;")
+                       .replace(/</g, "&lt;")
+                       .replace(/>/g, "&gt;");
+        }
+
+        function escapeAttr(str) {
+            return str.replace(/'/g, "&#39;").replace(/"/g, '&quot;');
+        }
+    </script>
+</body>
+</html>
