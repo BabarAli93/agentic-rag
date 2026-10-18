@@ -72,7 +72,7 @@ The Compose setup exposes Qdrant on ports `6333` (HTTP/API) and `6334` (gRPC), a
 Start the web app from the project directory:
 
 ```bash
-uv run uvicorn app:app --reload
+uv run app.py
 ```
 
 Open [http://localhost:8000](http://localhost:8000). FastAPI's interactive API documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs).
