@@ -67,11 +67,19 @@
             </div>
         </div>
 
-        <!-- Chat Input Bar -->
-        <div class="p-4 border-t border-slate-800 bg-slate-900/50">
-            <div class="max-w-4xl mx-auto flex gap-2">
+        <!-- Chat Input Bar & Live Status Indicator -->
+        <div class="p-4 border-t border-slate-800 bg-slate-900/50 flex flex-col gap-2">
+            <!-- Dynamic Agent Status Indicator -->
+            <div id="agent-status-container" class="max-w-4xl mx-auto w-full hidden">
+                <div class="inline-flex items-center gap-2 text-xs font-mono bg-indigo-950/60 border border-indigo-800/50 text-indigo-300 px-3 py-1 rounded-lg">
+                    <i class="fa-solid fa-circle-notch fa-spin text-indigo-400"></i>
+                    <span id="agent-status-text">Processing...</span>
+                </div>
+            </div>
+
+            <div class="max-w-4xl mx-auto w-full flex gap-2">
                 <textarea id="chat-input" rows="1" placeholder="Ask a question about your sources..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 resize-none" onkeydown="handleKeydown(event)"></textarea>
-                <button onclick="handleSend()" class="bg-indigo-600 hover:bg-indigo-500 px-5 rounded-xl font-medium text-sm transition flex items-center justify-center">
+                <button onclick="handleSend()" class="bg-indigo-600 hover:bg-indigo-500 px-5 rounded-xl font-medium text-sm transition flex items-center justify-center cursor-pointer">
                     <i class="fa-solid fa-paper-plane"></i>
                 </button>
             </div>
@@ -83,7 +91,7 @@
         <div class="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl flex flex-col max-h-[85vh] shadow-2xl">
             <div class="p-4 border-b border-slate-800 flex items-center justify-between">
                 <h3 id="modal-title" class="font-bold text-base text-slate-200 truncate">Source Inspector</h3>
-                <button onclick="closeInspector()" class="text-slate-400 hover:text-slate-200 p-1">
+                <button onclick="closeInspector()" class="text-slate-400 hover:text-slate-200 p-1 cursor-pointer">
                     <i class="fa-solid fa-xmark text-lg"></i>
                 </button>
             </div>
@@ -102,8 +110,6 @@
         }
         document.getElementById('tenant-badge').innerText = OWNER_ID.substring(0, 10);
 
-        // Use sessionStorage so every new tab / incognito window starts a fresh thread by default,
-        // while closing the tab creates a clean break.
         let CURRENT_THREAD_ID = sessionStorage.getItem('rag_thread_id');
         if (!CURRENT_THREAD_ID) {
             CURRENT_THREAD_ID = 'thread_' + Math.random().toString(36).substr(2, 9);
@@ -115,7 +121,6 @@
             loadChatHistory();
         });
 
-        // Function to wipe current chat UI and initialize a brand-new thread
         function startNewChat() {
             CURRENT_THREAD_ID = 'thread_' + Math.random().toString(36).substr(2, 9);
             sessionStorage.setItem('rag_thread_id', CURRENT_THREAD_ID);
@@ -133,12 +138,12 @@
 
         async function loadChatHistory() {
             try {
-                const res = await fetch(`/api/chat/history?thread_id=${CURRENT_THREAD_ID}`);
+                const res = await fetch(`/api/chat/history?thread_id=${CURRENT_THREAD_ID}&owner_id=${OWNER_ID}`);
                 const data = await res.json();
                 
                 if (data.messages && data.messages.length > 0) {
                     const container = document.getElementById('chat-messages');
-                    container.innerHTML = ""; // Clear initial welcome card
+                    container.innerHTML = "";
 
                     data.messages.forEach(msg => {
                         const msgId = appendMessage(msg.sender, "");
@@ -173,7 +178,7 @@
                         <div class="font-medium text-slate-200 truncate" title="${s.source_name}">${s.source_name}</div>
                         <div class="text-slate-500 mt-0.5">${s.chunk_count || 0} chunks (${s.source_type || 'doc'})</div>
                     </div>
-                    <button onclick="event.stopPropagation(); deleteSource('${s.source_id}', '${escapeHtml(s.source_name)}')" class="text-slate-500 hover:text-red-400 p-1.5 opacity-0 group-hover:opacity-100 transition" title="Delete source">
+                    <button onclick="event.stopPropagation(); deleteSource('${s.source_id}', '${escapeHtml(s.source_name)}')" class="text-slate-500 hover:text-red-400 p-1.5 opacity-0 group-hover:opacity-100 transition cursor-pointer" title="Delete source">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                 </div>
@@ -309,6 +314,17 @@
             }
         }
 
+        function updateAgentStatus(statusText) {
+            const container = document.getElementById('agent-status-container');
+            const textEl = document.getElementById('agent-status-text');
+            if (statusText) {
+                textEl.innerText = statusText;
+                container.classList.remove('hidden');
+            } else {
+                container.classList.add('hidden');
+            }
+        }
+
         async function handleSend() {
             const input = document.getElementById('chat-input');
             const text = input.value.trim();
@@ -319,6 +335,7 @@
 
             const aiMsgId = appendMessage("AI", "", false, false);
             let fullResponse = "";
+            updateAgentStatus("Initializing request...");
 
             try {
                 const response = await fetch('/api/chat/stream', {
@@ -346,11 +363,19 @@
                             const jsonStr = line.substring(6);
                             try {
                                 const data = JSON.parse(jsonStr);
+                                
+                                if (data.status) {
+                                    updateAgentStatus(data.status);
+                                }
+                                
                                 if (data.token) {
+                                    updateAgentStatus(""); // Hide status once generating
                                     fullResponse += data.token;
                                     updateMessageFormatted(aiMsgId, fullResponse);
                                 }
+                                
                                 if (data.error) {
+                                    updateAgentStatus("");
                                     updateMessageFormatted(aiMsgId, `Error: ${data.error}`);
                                 }
                             } catch (e) {
@@ -359,7 +384,9 @@
                         }
                     }
                 }
+                updateAgentStatus("");
             } catch (err) {
+                updateAgentStatus("");
                 updateMessageFormatted(aiMsgId, "Error communicating with the agent server.");
             }
         }
