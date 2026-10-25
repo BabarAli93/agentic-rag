@@ -6,8 +6,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+import re
 
-from agents.rag_agent import build_agent, get_checkpointer_cm
+from agents.graph import build_agent, get_checkpointer_cm
+from models.required_models import get_deployment_mode
 from services.source_manager import (
     add_file_source,
     add_url_source,
@@ -16,8 +18,26 @@ from services.source_manager import (
     get_chunks_by_source
 )
 
+# app = FastAPI(title="Agentic RAG Workbench")
 
-app = FastAPI(title="Agentic RAG Notebook Workbench")
+# Serve static frontend files
+#app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- STARTUP LOGIC ---
+    # This validates the mode on startup and crashes early if misconfigured
+    mode = get_deployment_mode()
+    print(f"🚀 Starting Agentic RAG Workbench in [{mode.upper()}] mode using .env configuration.")
+    
+    yield  # Application runs and handles requests here
+    
+    # --- SHUTDOWN LOGIC (Optional) ---
+    print("🛑 Shutting down Agentic RAG Workbench...")
+
+
+app = FastAPI(title="Agentic RAG Workbench", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Enable CORS for local development
 app.add_middleware(
@@ -27,10 +47,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Serve static frontend files
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
 
 @app.get("/")
 async def serve_index():
@@ -97,38 +113,71 @@ async def api_delete_source(source_id: str, owner_id: str = "default_user"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/chat")
 async def api_chat(data: ChatRequest):
     try:
-        agent = build_agent(data.owner_id)
-        
-        # Invoke LangGraph agent
-        result = agent.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": data.message,
-                    }
-                ]
-            },
-            config={"configurable": {"thread_id": data.thread_id}},
-        )
+        async with get_checkpointer_cm() as checkpointer:
+            agent = await build_agent(data.owner_id, checkpointer=checkpointer)
+            result = await agent.ainvoke(
+                {
+                    "owner_id": data.owner_id,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": data.message,
+                        }
+                    ],
+                    "retry_count": 0
+                },
+                config={"configurable": {"thread_id": data.thread_id}},
+            )
 
         final_message = result["messages"][-1]
-        
-        # Extract citations if your graph populates them, or return content
         return {
             "response": str(final_message.content),
-            "citations": []  # Hook into your retrieved source metadata chunks if available
+            "citations": []
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+import re
+
+def clean_streamed_content(content: str) -> str:
+    """Strips out internal model thinking tags, scratchpads, and conversational filler leaks."""
+    if not content:
+        return ""
+    
+    # 1. Remove standard reasoning tags (e.g., <think>...</think> from reasoning models)
+    cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+    
+    # 2. Remove unclosed or partial thinking tags if they leak during streaming
+    cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL)
+    
+    # 3. Strip leading internal monologues like 'AI: Okay, let me...' or similar patterns
+    cleaned = re.sub(r"^(AI:|Okay,|Let me).*?\n", "", cleaned, flags=re.IGNORECASE)
+    
+    return cleaned.strip()
+
+def clean_streamed_content(content: str) -> str:
+    """Strips out internal model thinking tags, scratchpads, and conversational filler leaks."""
+    if not content:
+        return ""
+    
+    # 1. Remove standard reasoning tags (e.g., <think>...</think> from reasoning models)
+    cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+    
+    # 2. Remove unclosed or partial thinking tags if they leak during streaming
+    cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL)
+    
+    # 3. Strip leading internal monologues like 'AI: Okay, let me...' or similar patterns
+    cleaned = re.sub(r"^(AI:|Okay,|Let me).*?\n", "", cleaned, flags=re.IGNORECASE)
+    
+    return cleaned.strip()
+
 @app.post("/api/chat/stream")
 async def api_chat_stream(payload: dict):
-
     message = payload.get("message")
     owner_id = payload.get("owner_id", "default_user")
     thread_id = payload.get("thread_id", "session_1")
@@ -136,33 +185,53 @@ async def api_chat_stream(payload: dict):
     if not message:
         raise HTTPException(status_code=400, detail="Message is required.")
 
-    #agent = build_agent(owner_id=owner_id)
     config = {"configurable": {"thread_id": thread_id}}
 
     async def event_generator():
-
         try:
-
-            # Safely open the request-bound SQLite checkpointer context
-            # Stream with LangGraph agent
             async with get_checkpointer_cm() as checkpointer:
                 agent = await build_agent(owner_id=owner_id, checkpointer=checkpointer)
-                async for event in agent.astream_events(
-                    {"messages": [{"role": "user", "content": message}]},
+                
+                async for update in agent.astream(
+                    {
+                        "owner_id": owner_id,
+                        "messages": [{"role": "user", "content": message}],
+                        "retry_count": 0
+                    },
                     config=config,
-                    version="v2"
-                    ):
+                    stream_mode="updates",
+                ):
+                    # 1. Stream step indicators to the UI (Drives your status badges / execution timeline)
+                    for node_name in update.keys():
+                        step_labels = {
+                            "router": "Analyzing user intent...",
+                            "rewriter": "Optimizing search query...",
+                            "retrieval": "Retrieving and reranking sources...",
+                            "grader": "Evaluating evidence sufficiency...",
+                            "refine": "Refining search terms...",
+                            "generator": "Synthesizing grounded response...",
+                            "grounding": "Verifying factual grounding...",
+                            "abstain": "Synthesizing final fallback..."
+                        }
+                        if node_name in step_labels:
+                            yield f"data: {json.dumps({'status': step_labels[node_name]})}\n\n"
 
-                    kind = event.get("event")
-                    # Stream LLM generated tokens
+                    # 2. Stream tokens strictly from response nodes (generator, general_chat, abstain)
+                    # Note: 'grounding' is excluded here so internal verification checks don't leak text into chat
+                    # Stream tokens only from the primary generator/response nodes smoothly
+                    for node_name in ("generator", "general_chat", "abstain"):
+                        node_update = update.get(node_name)
+                        if not node_update:
+                            continue
+                        messages = node_update.get("messages", [])
+                        if messages:
+                            raw_content = getattr(messages[-1], "content", None)
+                            if raw_content:
+                                safe_content = clean_streamed_content(raw_content)
+                                if safe_content:
+                                    # Yield tokens continuously without inserting block dividers
+                                    yield f"data: {json.dumps({'token': safe_content})}\n\n"
 
-                    if kind == "on_chat_model_stream":
-                        chunk = event.get("data", {}).get("chunk")
-                        if chunk and chunk.content:
-                            # Send token as SSE data packet
-                            yield f"data: {json.dumps({'token': chunk.content})}\n\n"
-
-                # Send completion signal
                 yield f"data: {json.dumps({'done': True})}\n\n"
 
         except Exception as e:
@@ -172,15 +241,14 @@ async def api_chat_stream(payload: dict):
 
 
 @app.get("/api/chat/history")
-async def api_get_chat_history(thread_id: str = "default_thread"):
+async def api_get_chat_history(thread_id: str = "default_thread", owner_id: str = "default_user"):
     try:
         config = {"configurable": {"thread_id": thread_id}}
         
-        # Open checkpointer and build agent to fetch state cleanly
+        # Open checkpointer and build agent with correct owner context
         async with get_checkpointer_cm() as checkpointer:
-            agent = await build_agent(owner_id="default_user", checkpointer=checkpointer)
+            agent = await build_agent(owner_id=owner_id, checkpointer=checkpointer)
             
-            # Fetch current graph state using official get_state method
             state_snapshot = await agent.aget_state(config)
             
             if not state_snapshot or not state_snapshot.values:
@@ -190,7 +258,6 @@ async def api_get_chat_history(thread_id: str = "default_thread"):
             serialized_messages = []
             
             for msg in messages:
-                # Handle LangChain message classes or dictionary structures
                 if hasattr(msg, "type") and hasattr(msg, "content"):
                     role = "User" if msg.type in ("human", "user") else "AI"
                     serialized_messages.append({"sender": role, "text": msg.content})
@@ -204,8 +271,9 @@ async def api_get_chat_history(thread_id: str = "default_thread"):
         print(f"Error loading chat history: {e}")
         return {"messages": []}
 
+
 @app.get('/api/sources/{source_id}/chunks')
-async def api_get_source_chunks(source_id:str, owner_id: str = "default_user"):
+async def api_get_source_chunks(source_id: str, owner_id: str = "default_user"):
     try:
         chunks = get_chunks_by_source(source_id=source_id, owner_id=owner_id)
         return {"source_id": source_id, "chunks": chunks}

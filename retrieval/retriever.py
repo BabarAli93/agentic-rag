@@ -11,7 +11,7 @@ def get_retriever(owner_id: str | None = None):
     vector_store = get_vector_store()
 
     # Fetch more initial candidates (e.g., 15) for the reranker to prune down
-    search_kwargs= {"k": 15}
+    search_kwargs= {"k": 30}
 
     if owner_id is not None:
         search_kwargs["filter"] = models.Filter(
