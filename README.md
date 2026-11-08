@@ -6,41 +6,14 @@ A tenant-aware, enterprise-grade document, media, and website question-answering
 
 ## ✨ Key features
 
-- **Enterprise Security & Keycloak OIDC/JWT (v1.3.0):**
-  - Verify Keycloak-compatible JWTs, enforce role-based access, scope sources by authenticated tenant, and scope chat history by tenant and user.
-  - Production-grade RS256 token verification via `PyJWKClient` and Keycloak identity provider integration.
-  - Strict JWT validation enforcing core standard claims (`exp`, `iat`, `iss`, `sub`, `aud`) and structural safeguards.
-  - User attribute mapping for multi-tenant data isolation (`tenant_id`), eliminating untrusted client-side identities.
-  - Integrated OIDC login/logout controls, auto-refreshing token loops, and dynamic user/tenant badge rendering in the UI.
-
-- **Fail-Closed Input & Output Guardrails:**
-  - **Input Guardrails:** Multi-stage prompt injection detection using pattern matching and fail-closed LLM safety classification.
-  - **Output Guardrails:** Automated PII and credential leak detection (SSN, API keys, private tokens, credit cards) before sending responses to clients.
-
-- **Expanded Ingestion & Source Management:**
-  - **Multimodal Support:** Upload PDF, TXT, Markdown, and DOCX files; index web pages and YouTube transcripts.
-  - **Full Lifecycle Management:** Inspect chunked text excerpts, delete sources from storage, and re-index existing sources on demand.
-  - **Smart Re-indexing:** Compares content hashes to skip re-embedding when source content has not changed, conserving API quota and compute.
-  - **Optimized Chunking:** Context-preserving splitters (2,000 characters with 400 overlap) balancing semantic context preservation across chunk boundaries.
-
-- **Multi-Provider Model Ecosystem:**
-  - Flexible provider selection across **OpenAI** (`gpt-4o-mini`), **HuggingFace**, **Ollama** (`qwen2.5`), and OpenAI-compatible **vLLM** endpoints via LangChain connectors.
-
-- **Stateful LangGraph Agent & Corrective RAG:**
-  - Explicit workflow nodes for query routing, query rewriting, hybrid retrieval, evidence grading, answer generation, and grounding checks.
-  - Automated retry loops (up to 2 retries) with query refinement before falling back to graceful abstention.
-  - SQLite persistence via `langgraph-checkpoint-sqlite` to maintain thread state and citation evidence maps across sessions.
-
-- **Hybrid Search & Reranking:**
-  - Dense semantic + sparse keyword search via **Qdrant**, strictly filtered by `tenant_id`.
-  - Local **FlashRank** (`ms-marco-MiniLM-L-12-v2`) reranking to reduce candidate chunks to top-scoring passages.
-
-- **Evaluation & Observability:**
-  - Integrated RAG evaluation pipeline powered by **Ragas** for measuring faithfulness and answer relevance.
-  - Optional **LangSmith** tracing for end-to-end agent execution inspection.
-
-- **Interactive UI & Streaming:**
-  - Real-time status indicators, token-by-token SSE response streaming, interactive evidence panel, and source chunk inspection modal.
+- **Enterprise OIDC/JWT Security (Keycloak):** Production-grade RS256 token verification via `PyJWKClient` enforcing standard claims (`exp`, `iss`, `sub`, `aud`). Dynamically isolates tenant data (`tenant_id`) and user session history with OIDC auth flows and UI token refresh loops.
+- **Fail-Closed Security Guardrails:** Regex and LLM-powered prompt injection detection for user inputs, paired with automated PII and credential leak scanning (SSNs, API keys, cards) for model outputs.
+- **Multi-Format Ingestion & Smart Re-indexing:** Ingest PDF, TXT, Markdown, DOCX, web pages, and YouTube transcripts with 2,000-char context-preserving chunking. Includes chunk inspection, deletion, and content-hash comparison to skip redundant re-embedding.
+- **Multi-Provider LLM Ecosystem:** Seamlessly switch between OpenAI, HuggingFace, Ollama, and OpenAI-compatible vLLM endpoints.
+- **Stateful LangGraph & Corrective RAG:** Multi-node agent workflow for query routing, rewriting, evidence grading, answer generation, and grounding checks, with automated retry loops (up to 2 retries) and SQLite thread persistence.
+- **Tenant-Isolated Hybrid Search & Reranking:** Qdrant dense semantic + sparse keyword search scoped strictly by `tenant_id`, paired with local **FlashRank** (`ms-marco-MiniLM-L-12-v2`) reranking to isolate top passages.
+- **Evaluation & Observability:** Integrated **Ragas** pipeline for evaluating faithfulness and relevance, plus optional **LangSmith** tracing for full graph execution visibility.
+- **Real-Time Streaming UI:** Interactive workbench with token-by-token SSE streaming, live agent status indicators, dynamic evidence panel, and chunk inspection tools.
 
 ## 🧩 Agent Architecture
 
