@@ -46,7 +46,8 @@ async def retrieval_and_rerank_node(state: AgentState):
             "text": doc.page_content,
             "metadata": {
                 "source_name": source_name,
-                "chunk_index": meta.get("chunk_index", idx)
+                "chunk_index": meta.get("chunk_index", idx),
+                "chunk_id": meta.get("chunk_id", str(idx))
             }
         })
 
@@ -56,15 +57,26 @@ async def retrieval_and_rerank_node(state: AgentState):
 
     # Clean, token-efficient passage formatting
     formatted_results = []
-    for item in ranked[:8]:
+    retrieved_chunks = []
+
+    for idx, item in enumerate(ranked[:8], start=1):
         metadata = item.get("metadata") or {}
         s_name = metadata.get("source_name") or metadata.get("source") or "Indexed Source"
         content = item.get("text", "").strip()
+        chunk_id = metadata.get("chunk_id", str(idx))
 
         # Include clear, lightweight source tags for LLM citation placement
-        formatted_block = f"\n{content}"
+        #formatted_block = f"\n{content}"
+        formatted_block = f"[cite: {idx}] Source: {s_name}\n{content}"
         if formatted_block not in formatted_results:
             formatted_results.append(formatted_block)
+            retrieved_chunks.append({
+                "id": idx,
+                "chunk_id": chunk_id,
+                "source": s_name,
+                "page_or_section": f"Chunk {idx}",
+                "content": content
+            })
 
     final_documents = "\n\n---\n\n".join(formatted_results)
-    return {"documents": final_documents}
+    return {"documents": final_documents, "retrieved_chunks": retrieved_chunks}

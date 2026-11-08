@@ -4,4 +4,7 @@ __pycache__/
 *.pyc
 # Local runtime databases
 /storage/checkpoints.sqlite
+/storage/checkpoints.sqlite-x-checkpoints-*-checkpoint.bin
 /storage/sources.db
+/storage/uploads/
+evaluation/results/

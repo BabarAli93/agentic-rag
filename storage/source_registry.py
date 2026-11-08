@@ -24,6 +24,7 @@ def init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'pending',
                 chunk_count INTEGER NOT NULL DEFAULT 0,
                 error_message TEXT,
+                content_hash TEXT, -- Added for incremental indexing
                 created_at TEXT NOT NULL DEFAULT
                     (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                 updated_at TEXT NOT NULL DEFAULT
@@ -94,6 +95,7 @@ def update_source(
         status: str,
         chunk_count: int | None = None,
         error_message: str | None = None,
+        content_hash: str  | None = None,
 ) -> None:
     
     with _connect() as conn:
@@ -103,11 +105,12 @@ def update_source(
             SET status = ?,
                 chunk_count = COALESCE(?, chunk_count),
                 error_message = ?,
+                content_hash = COALESCE(?, content_hash),
                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
             WHERE source_id = ? AND owner_id = ?
             """,
             (
-                status, chunk_count, error_message,
+                status, chunk_count, error_message, content_hash,
                 source_id, owner_id,
             ),
         )

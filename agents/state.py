@@ -1,4 +1,4 @@
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
@@ -15,6 +15,10 @@ class AgentState(TypedDict):
     grounded: bool
     generation: str
     retry_count: int
+
+    # Adding for Clickable Citations (#16) 
+    retrieved_chunks: List[Dict[str, Any]]
+    citations: List[Dict[str, Any]]
 
 
 class RouterDecision(BaseModel):
