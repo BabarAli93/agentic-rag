@@ -7,14 +7,9 @@ from agents.state import AgentState, GroundingGrade
 logger = logging.getLogger(__name__)
 model = get_chat_model()
 
-from langchain_core.messages import AIMessage, HumanMessage
-from models.required_models import get_chat_model
-from agents.state import AgentState
-
-model = get_chat_model()
-
 async def generator_node(state: AgentState):
     docs = state.get("documents", "")
+    chunks = state.get("retrieved_chunks", [])
     user_msg = state["messages"][-1].content
 
     prompt = (
@@ -22,7 +17,7 @@ async def generator_node(state: AgentState):
         "Provide a clear, detailed, and well-structured answer to the user's question "
         "using ONLY facts explicitly supported by the context excerpts below.\n\n"
         "CITATION RULES:\n"
-        "- Every factual statement or claim MUST include an inline citation badge using the exact source name from the excerpt, formatted strictly as:.\n"
+        "- Every factual statement or claim MUST include an inline citation badge using the exact format[cite: 1] or [1] matching the index number provided in the context excerpts.\n"
         "- Do not invent citations or omit source markers.\n\n"
         f"Context Excerpts:\n{docs}\n\nUser Question: {user_msg}"
     )
@@ -30,7 +25,11 @@ async def generator_node(state: AgentState):
     res = await model.ainvoke([HumanMessage(content=prompt)])
     
     # Return as messages list so LangGraph standard stream catches it instantly
-    return {"messages": [AIMessage(content=res.content)]}
+    return {
+        "messages": [AIMessage(content=res.content)],
+        "generation": res.content,
+        "citations": chunks
+    }
 
 
 async def grounding_checker_node(state: AgentState):
@@ -59,4 +58,4 @@ async def grounding_checker_node(state: AgentState):
 
 async def abstain_node(state: AgentState):
     msg = "I checked your indexed sources, but I couldn't find sufficient information to answer your question accurately."
-    return {"messages": [AIMessage(content=msg)]}
+    return {"messages": [AIMessage(content=msg)], "citations": []}

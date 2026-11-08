@@ -7,6 +7,8 @@
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <!-- Marked.js for clean Markdown rendering during chat streaming -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Keycloak JS Adapter for OIDC Authentication -->
+    <script src="https://cdn.jsdelivr.net/npm/keycloak-js@24.0.0/dist/keycloak.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="bg-slate-900 text-slate-100 h-screen flex overflow-hidden font-sans">
@@ -17,7 +19,7 @@
             <h1 class="font-bold text-lg flex items-center gap-2">
                 <i class="fa-solid fa-book-bookmark text-indigo-400"></i> Sources Workbench
             </h1>
-            <span id="tenant-badge" class="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono" title="Isolated Session ID">session</span>
+            <span id="tenant-badge" class="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono" title="Authenticated Session">unauthenticated</span>
         </div>
 
         <!-- Sources List -->
@@ -32,29 +34,37 @@
                 <label class="text-xs font-semibold text-slate-400">Add Website URL</label>
                 <div class="flex gap-2">
                     <input type="url" id="url-input" placeholder="https://example.com" class="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-indigo-500">
-                    <button onclick="handleUrlSubmit()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-sm font-medium transition">Add</button>
+                    <button onclick="handleUrlSubmit()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-sm font-medium transition cursor-pointer">Add</button>
                 </div>
             </div>
 
             <!-- File Upload Form -->
             <div class="space-y-1">
-                <label class="text-xs font-semibold text-slate-400">Upload PDF / TXT</label>
-                <input type="file" id="file-input" multiple accept=".pdf,.txt" onchange="handleFileUpload(event)" class="w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
+                <label class="text-xs font-semibold text-slate-400">Upload Documents (PDF, TXT, MD, DOCX)</label>
+                <input type="file" id="file-input" multiple accept=".pdf,.txt,.md,.docx" onchange="handleFileUpload(event)" class="w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer">
             </div>
         </div>
     </aside>
 
     <!-- MAIN CHAT AREA -->
-    <main class="flex-1 flex flex-col bg-slate-950">
+    <main class="flex-1 flex flex-col bg-slate-950 border-r border-slate-800">
         <!-- Chat Header -->
         <header class="h-14 border-b border-slate-800 px-6 flex items-center justify-between bg-slate-900/50">
             <div class="flex items-center gap-2">
                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span class="text-sm font-medium text-slate-300">Agentic RAG Engine Active</span>
             </div>
+            <div class="flex items-center gap-3">
+                <button id="login-btn" onclick="triggerLogin()" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded-lg transition cursor-pointer">
+                <i class="fa-solid fa-right-to-bracket mr-1"></i> Login
+            </button>
+            <button id="logout-btn" onclick="triggerLogout()" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg transition cursor-pointer">
+                <i class="fa-solid fa-right-from-bracket mr-1"></i> Logout
+            </button>
             <button onclick="startNewChat()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer" title="Start a fresh chat thread">
                 <i class="fa-solid fa-plus text-[10px]"></i> New Chat
             </button>
+            </div>
         </header>
 
         <!-- Chat Messages Stream -->
@@ -62,7 +72,7 @@
             <div class="flex gap-3">
                 <div class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold shrink-0">AI</div>
                 <div class="bg-slate-900 rounded-2xl px-4 py-3 max-w-2xl text-sm leading-relaxed border border-slate-800">
-                    Hello! I am your Agentic RAG assistant. Add your PDFs, TXT files, or website URLs on the left panel, and ask me anything about them! Click any source on the left to inspect its extracted chunks.
+                    Hello! I am your Agentic RAG assistant. Add your PDFs, TXT files, or website URLs on the left panel, and ask me anything about them! Click any citation pill in the answers to inspect the source evidence on the right.
                 </div>
             </div>
         </div>
@@ -86,6 +96,22 @@
         </div>
     </main>
 
+    <!-- RIGHT SIDEBAR: Evidence Panel -->
+    <aside class="w-96 bg-slate-950 flex flex-col">
+        <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/30">
+            <h2 class="font-bold text-sm flex items-center gap-2 text-indigo-400">
+                <i class="fa-solid fa-file-shield text-xs"></i> Source Evidence Panel
+            </h2>
+            <span class="text-[10px] bg-indigo-950 text-indigo-300 px-2 py-0.5 rounded border border-indigo-800/50 font-mono">Grounded</span>
+        </div>
+        <div id="evidence-content" class="flex-1 overflow-y-auto p-4 text-xs text-slate-400 space-y-3">
+            <div class="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-2">
+                <p class="text-slate-300 font-medium">How to verify citations:</p>
+                <p class="leading-relaxed text-slate-400">When the AI generates a response with inline citation badges (e.g., <span class="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded font-mono border border-indigo-800/50">[1]</span>), click any badge to inspect the exact retrieved text chunk, source filename, and section metadata right here.</p>
+            </div>
+        </div>
+    </aside>
+
     <!-- SOURCE INSPECTOR MODAL -->
     <div id="inspector-modal" class="fixed inset-0 bg-black/70 backdrop-blur-xs hidden items-center justify-center z-50 p-6">
         <div class="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl flex flex-col max-h-[85vh] shadow-2xl">
@@ -103,12 +129,18 @@
 
     <!-- FRONTEND JAVASCRIPT LOGIC -->
     <script>
-        let OWNER_ID = localStorage.getItem('rag_owner_id');
-        if (!OWNER_ID) {
-            OWNER_ID = 'user_' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('rag_owner_id', OWNER_ID);
+        // --- KEYCLOAK OIDC SETUP ---
+        let keycloak = null;
+
+        try {
+            keycloak = new Keycloak({
+                url: 'http://localhost:8080',
+                realm: 'agentic-rag',
+                clientId: 'agentic-rag-backend'
+            });
+        } catch (e) {
+            console.log("Keycloak client initialization skipped.");
         }
-        document.getElementById('tenant-badge').innerText = OWNER_ID.substring(0, 10);
 
         let CURRENT_THREAD_ID = sessionStorage.getItem('rag_thread_id');
         if (!CURRENT_THREAD_ID) {
@@ -116,7 +148,87 @@
             sessionStorage.setItem('rag_thread_id', CURRENT_THREAD_ID);
         }
 
-        window.addEventListener('DOMContentLoaded', () => {
+        // Strict Authorization Header Helper (Relying purely on verified Keycloak OIDC tokens)
+        async function getAuthHeaders(extraHeaders = {}) {
+            if (keycloak && keycloak.authenticated) {
+                try {
+                    // Refresh token if it expires within the next 30 seconds
+                    await keycloak.updateToken(30);
+                    if (keycloak.token) {
+                        return {
+                            'Authorization': `Bearer ${keycloak.token}`,
+                            ...extraHeaders
+                        };
+                    }
+                } catch (err) {
+                    console.error("Failed to refresh Keycloak token, prompting login:", err);
+                    keycloak.login();
+                    return extraHeaders;
+                }
+            }
+
+            // If Keycloak is not authenticated, check if local development mode is active.
+            // Otherwise, return headers without a fake bearer token to let FastAPI handle 401 cleanly.
+            return {
+                ...extraHeaders
+            };
+        }
+
+        function triggerLogin() {
+            if (keycloak) {
+                keycloak.login();
+            } else {
+                console.error("Keycloak client instance is not initialized.");
+            }
+        }
+
+        function triggerLogout() {
+            if (keycloak) {
+                keycloak.logout({
+                    redirectUri: window.location.origin
+                });
+            } else {
+                // Fallback local cleanup if keycloak isn't loaded
+                window.location.reload();
+            }
+        }
+        let currentCitationsMap = {};
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            let userAuthenticated = false;
+
+            if (keycloak) {
+                try {
+                    userAuthenticated = await keycloak.init({ 
+                        onLoad: 'check-sso',
+                        checkLoginIframe: false
+                    });
+
+                    if (userAuthenticated && keycloak.tokenParsed) {
+                        // Explicitly separate user identity and tenant identity claims
+                        const username = keycloak.tokenParsed.preferred_username || keycloak.tokenParsed.sub;
+                        const tenantId = keycloak.tokenParsed.tenant_id || 'default-tenant';
+                        
+                        document.getElementById('logout-btn').classList.remove('hidden');
+                        
+                        document.getElementById('tenant-badge').innerText = `User: ${username} | Tenant: ${tenantId}`;
+
+                        // Periodic token refresh interval
+                        setInterval(() => {
+                            keycloak.updateToken(70).catch(() => keycloak.login());
+                        }, 60000);
+                    }
+                } catch (err) {
+                    console.warn("Keycloak initialization warning:", err);
+                }
+            }
+
+            if (!userAuthenticated) {
+                // Show login button if running in production OIDC mode and unauthenticated
+                document.getElementById('login-btn').classList.remove('hidden');
+                document.getElementById('tenant-badge').innerText = 'Unauthenticated';
+            }
+
             loadSources();
             loadChatHistory();
         });
@@ -124,21 +236,30 @@
         function startNewChat() {
             CURRENT_THREAD_ID = 'thread_' + Math.random().toString(36).substr(2, 9);
             sessionStorage.setItem('rag_thread_id', CURRENT_THREAD_ID);
+            currentCitationsMap = {};
             
             const container = document.getElementById('chat-messages');
             container.innerHTML = `
                 <div class="flex gap-3">
                     <div class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold shrink-0">AI</div>
                     <div class="bg-slate-900 rounded-2xl px-4 py-3 max-w-2xl text-sm leading-relaxed border border-slate-800">
-                        Hello! I am your Agentic RAG assistant. Add your PDFs, TXT files, or website URLs on the left panel, and ask me anything about them! Click any source on the left to inspect its extracted chunks.
+                        Hello! I am your Agentic RAG assistant. Add your PDFs, TXT files, or website URLs on the left panel, and ask me anything about them! Click any citation pill in the answers to inspect the source evidence on the right.
                     </div>
+                </div>
+            `;
+
+            document.getElementById('evidence-content').innerHTML = `
+                <div class="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-2">
+                    <p class="text-slate-300 font-medium">How to verify citations:</p>
+                    <p class="leading-relaxed text-slate-400">When the AI generates a response with inline citation badges (e.g., <span class="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded font-mono border border-indigo-800/50">[1]</span>), click any badge to inspect the exact retrieved text chunk, source filename, and section metadata right here.</p>
                 </div>
             `;
         }
 
         async function loadChatHistory() {
             try {
-                const res = await fetch(`/api/chat/history?thread_id=${CURRENT_THREAD_ID}&owner_id=${OWNER_ID}`);
+                const headers = await getAuthHeaders();
+                const res = await fetch(`/api/chat/history?thread_id=${CURRENT_THREAD_ID}`, { headers });
                 const data = await res.json();
                 
                 if (data.messages && data.messages.length > 0) {
@@ -147,7 +268,7 @@
 
                     data.messages.forEach(msg => {
                         const msgId = appendMessage(msg.sender, "");
-                        updateMessageFormatted(msgId, msg.text);
+                        updateMessageFormatted(msgId, msg.text, []);
                     });
                 }
             } catch (err) {
@@ -157,7 +278,8 @@
 
         async function loadSources() {
             try {
-                const res = await fetch(`/api/sources?owner_id=${OWNER_ID}`);
+                const headers = await getAuthHeaders();
+                const res = await fetch(`/api/sources`, { headers });
                 const data = await res.json();
                 renderSourcesList(data.sources || []);
             } catch (err) {
@@ -178,9 +300,14 @@
                         <div class="font-medium text-slate-200 truncate" title="${s.source_name}">${s.source_name}</div>
                         <div class="text-slate-500 mt-0.5">${s.chunk_count || 0} chunks (${s.source_type || 'doc'})</div>
                     </div>
-                    <button onclick="event.stopPropagation(); deleteSource('${s.source_id}', '${escapeHtml(s.source_name)}')" class="text-slate-500 hover:text-red-400 p-1.5 opacity-0 group-hover:opacity-100 transition cursor-pointer" title="Delete source">
-                        <i class="fa-solid fa-trash"></i>
-                    </button>
+                    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                        <button onclick="event.stopPropagation(); reindexSource('${s.source_id}', '${escapeHtml(s.source_name)}')" class="text-slate-500 hover:text-indigo-400 p-1.5 transition cursor-pointer" title="Re-index / Refresh source">
+                            <i class="fa-solid fa-rotate"></i>
+                        </button>
+                        <button onclick="event.stopPropagation(); deleteSource('${s.source_id}', '${escapeHtml(s.source_name)}')" class="text-slate-500 hover:text-red-400 p-1.5 transition cursor-pointer" title="Delete source">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
                 </div>
             `).join('');
         }
@@ -198,7 +325,8 @@
             document.getElementById('inspector-modal').classList.add('flex');
 
             try {
-                const res = await fetch(`/api/sources/${sourceId}/chunks?owner_id=${OWNER_ID}`);
+                const headers = await getAuthHeaders();
+                const res = await fetch(`/api/sources/${sourceId}/chunks`, { headers });
                 const data = await res.json();
                 
                 if (!data.chunks || data.chunks.length === 0) {
@@ -238,8 +366,10 @@
             if (!confirm(`Are you sure you want to delete "${sourceName}"? This will remove it from Qdrant storage and your active sources.`)) return;
 
             try {
-                const res = await fetch(`/api/sources/${sourceId}?owner_id=${OWNER_ID}`, {
-                    method: 'DELETE'
+                const headers = await getAuthHeaders();
+                const res = await fetch(`/api/sources/${sourceId}`, {
+                    method: 'DELETE',
+                    headers
                 });
                 if (res.ok) {
                     loadSources();
@@ -260,10 +390,11 @@
             appendMessage("System", `Indexing website: ${url}...`, true);
 
             try {
+                const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
                 const res = await fetch('/api/sources/url', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url, owner_id: OWNER_ID })
+                    headers,
+                    body: JSON.stringify({ url: url })
                 });
                 if (res.ok) {
                     loadSources();
@@ -284,13 +415,14 @@
             for (const file of files) {
                 const formData = new FormData();
                 formData.append('file', file);
-                formData.append('owner_id', OWNER_ID);
 
                 appendMessage("System", `Uploading and indexing ${file.name}...`, true);
 
                 try {
+                    const headers = await getAuthHeaders(); // Do not manually set Content-Type for FormData
                     const res = await fetch('/api/sources/file', {
                         method: 'POST',
+                        headers,
                         body: formData
                     });
                     if (res.ok) {
@@ -325,6 +457,31 @@
             }
         }
 
+        async function reindexSource(sourceId, sourceName) {
+            if (!confirm(`Are you sure you want to re-index "${sourceName}"? This will scrape/re-parse the latest content and refresh vectors.`)) return;
+
+            appendMessage("System", `Re-indexing ${sourceName}...`, true);
+
+            try {
+                const headers = await getAuthHeaders();
+                const res = await fetch(`/api/sources/${sourceId}/reindex`, {
+                    method: 'POST',
+                    headers
+                });
+
+                if (res.ok) {
+                    loadSources();
+                    appendMessage("System", `Successfully re-indexed "${sourceName}"!`, true);
+                } else {
+                    const err = await res.json();
+                    appendMessage("System", `Failed to re-index "${sourceName}": ${err.detail || 'Server error'}`, true);
+                }
+            } catch (e) {
+                console.error("Failed to re-index source", e);
+                appendMessage("System", `Network error while re-indexing "${sourceName}".`, true);
+            }
+        }
+
         async function handleSend() {
             const input = document.getElementById('chat-input');
             const text = input.value.trim();
@@ -335,13 +492,15 @@
 
             const aiMsgId = appendMessage("AI", "", false, false);
             let fullResponse = "";
+            let finalCitations = [];
             updateAgentStatus("Initializing request...");
 
             try {
+                const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
                 const response = await fetch('/api/chat/stream', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, owner_id: OWNER_ID, thread_id: CURRENT_THREAD_ID })
+                    headers,
+                    body: JSON.stringify({ message: text, thread_id: CURRENT_THREAD_ID })
                 });
 
                 if (!response.ok) throw new Error("Failed to connect to streaming endpoint.");
@@ -369,14 +528,20 @@
                                 }
                                 
                                 if (data.token) {
-                                    updateAgentStatus(""); // Hide status once generating
+                                    updateAgentStatus(""); 
                                     fullResponse += data.token;
-                                    updateMessageFormatted(aiMsgId, fullResponse);
+                                    updateMessageFormatted(aiMsgId, fullResponse, finalCitations);
+                                }
+
+                                if (data.citations) {
+                                    finalCitations = data.citations;
+                                    currentCitationsMap[aiMsgId] = finalCitations;
+                                    updateMessageFormatted(aiMsgId, fullResponse, finalCitations);
                                 }
                                 
                                 if (data.error) {
                                     updateAgentStatus("");
-                                    updateMessageFormatted(aiMsgId, `Error: ${data.error}`);
+                                    updateMessageFormatted(aiMsgId, `Error: ${data.error}`, []);
                                 }
                             } catch (e) {
                                 console.error("Error parsing SSE JSON", e);
@@ -387,7 +552,7 @@
                 updateAgentStatus("");
             } catch (err) {
                 updateAgentStatus("");
-                updateMessageFormatted(aiMsgId, "Error communicating with the agent server.");
+                updateMessageFormatted(aiMsgId, "Error communicating with the agent server.", []);
             }
         }
 
@@ -413,39 +578,23 @@
             return msgId;
         }
 
-        function updateMessageFormatted(msgId, rawText) {
+        function updateMessageFormatted(msgId, rawText, citations) {
             const el = document.getElementById(msgId);
             if (!el) return;
             const bubble = el.querySelector('div:nth-child(2)');
             if (!bubble) return;
 
-            let processedText = rawText.replace(/\[\s*(?:CITATION REF\s*->\s*)?Source:\s*([^\]]+)\]/gi, (match, sourceName) => {
-                const cleanName = sourceName.trim();
-                let displayLabel = cleanName;
-                if (cleanName.startsWith('http://') || cleanName.startsWith('https://')) {
-                    try {
-                        const parsedUrl = new URL(cleanName);
-                        displayLabel = parsedUrl.hostname + parsedUrl.pathname.substring(0, 15) + '...';
-                    } catch (e) {
-                        displayLabel = cleanName;
-                    }
-                }
+            if (citations && citations.length > 0) {
+                currentCitationsMap[msgId] = citations;
+            }
 
-                return ` <button data-source-name="${escapeAttr(cleanName)}" class="citation-trigger inline-flex items-center gap-1 bg-indigo-950/80 border border-indigo-700/50 text-indigo-300 hover:bg-indigo-900 px-2 py-0.5 rounded text-xs mx-1 font-mono transition cursor-pointer" title="Inspect source: ${escapeAttr(cleanName)}">
-                    <i class="fa-solid fa-file-lines text-[10px]"></i> ${escapeHtmlText(displayLabel)}
+            let processedText = rawText.replace(/\[(?:cite:\s*)?(\d+)\]/gi, (match, id) => {
+                return ` <button onclick="showEvidence('${msgId}', ${id})" class="inline-flex items-center gap-1 bg-indigo-950/80 border border-indigo-700/50 text-indigo-300 hover:bg-indigo-900 px-2 py-0.5 rounded text-xs mx-0.5 font-mono transition cursor-pointer" title="Inspect citation [${id}]">
+                    <i class="fa-solid fa-file-lines text-[10px]"></i> [${id}]
                 </button> `;
             });
 
             bubble.innerHTML = marked.parse(processedText);
-
-            bubble.querySelectorAll('.citation-trigger').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const sourceName = btn.getAttribute('data-source-name');
-                    triggerInspectByName(sourceName);
-                });
-            });
 
             bubble.querySelectorAll('p').forEach(p => p.classList.add('mb-3', 'leading-relaxed'));
             bubble.querySelectorAll('ul').forEach(ul => ul.classList.add('my-2', 'pl-5', 'list-disc', 'space-y-1'));
@@ -459,46 +608,39 @@
             container.scrollTop = container.scrollHeight;
         }
 
-        async function triggerInspectByName(sourceName) {
-            try {
-                const res = await fetch(`/api/sources?owner_id=${OWNER_ID}`);
-                const data = await res.json();
-                const sources = data.sources || [];
+        function showEvidence(msgId, citationId) {
+            const citations = currentCitationsMap[msgId] || [];
+            const chunk = citations.find(c => c.id === Number(citationId));
+            const evidencePanel = document.getElementById('evidence-content');
 
-                if (sources.length === 0) {
-                    alert("No active sources in workspace.");
-                    return;
-                }
+            if (!evidencePanel) return;
 
-                const target = sourceName.toLowerCase().trim();
-                let found = sources.find(s => 
-                    s.source_id.toLowerCase() === target || 
-                    s.source_name.toLowerCase() === target
-                );
-
-                if (!found) {
-                    found = sources.find(s => 
-                        target.includes(s.source_name.toLowerCase()) || 
-                        s.source_name.toLowerCase().includes(target)
-                    );
-                }
-
-                if (!found && (target.startsWith('http://') || target.startsWith('https://'))) {
-                    found = sources.find(s => s.source_type === 'url' || s.source_name.includes('http'));
-                }
-
-                if (!found) {
-                    found = sources[0];
-                }
-
-                if (found) {
-                    inspectSource(found.source_id, found.source_name);
-                } else {
-                    alert(`Source "${sourceName}" could not be matched.`);
-                }
-            } catch (e) {
-                console.error("Could not open source inspector", e);
+            if (!chunk) {
+                evidencePanel.innerHTML = `
+                    <div class="p-4 bg-red-950/40 border border-red-900/50 rounded-xl space-y-2">
+                        <p class="text-red-300 font-medium text-xs">Evidence chunk [${citationId}] not found in metadata state.</p>
+                    </div>
+                `;
+                return;
             }
+
+            evidencePanel.innerHTML = `
+                <div class="space-y-3 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-mono bg-indigo-950 text-indigo-300 px-2 py-1 rounded border border-indigo-800/50">Citation [${chunk.id}]</span>
+                        <span class="text-xs text-slate-500 font-mono">${chunk.page_or_section || 'N/A'}</span>
+                    </div>
+                    <div>
+                        <p class="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Source File / URL</p>
+                        <p class="text-xs font-semibold text-slate-200 truncate mt-0.5" title="${escapeAttr(chunk.source)}">${chunk.source}</p>
+                    </div>
+                    <hr class="border-slate-800">
+                    <div>
+                        <p class="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-1">Retrieved Chunk Excerpt</p>
+                        <p class="text-xs text-slate-300 whitespace-pre-wrap font-mono bg-slate-950 p-3 rounded border border-slate-800 leading-relaxed">${escapeHtmlText(chunk.content)}</p>
+                    </div>
+                </div>
+            `;
         }
 
         function escapeHtmlText(text) {
